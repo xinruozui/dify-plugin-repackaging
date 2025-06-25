@@ -1,0 +1,71 @@
+# .github/workflows/daily-arm-plugin-build.yml
+
+name: Daily Build Dify ARM Plugins
+
+on:
+  # 1. 定时触发：每天凌晨2点 (UTC时间) 自动运行
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # 2. 手动触发：允许你在 GitHub Actions 页面手动运行此工作流，方便测试
+  workflow_dispatch:
+
+# 设置工作流的默认权限，创建 Release 需要写入内容的权限
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest # 使用最新的 Ubuntu 运行环境
+    
+    steps:
+      # 步骤 1: 检出你的仓库代码
+      # 这个工作流文件需要放在 junjiem/dify-plugin-repackaging 的一个 fork 或副本中
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 步骤 2: 设置 QEMU，用于模拟不同 CPU 架构
+      # 这是跨平台构建 ARM 镜像所必需的
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # 步骤 3: 设置 Docker Buildx
+      # Buildx 是一个 Docker CLI 插件，可以轻松地进行多平台构建
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 步骤 4: 运行打包脚本
+      # 脚本会使用 Docker Buildx 来构建 ARM64 平台的插件
+      - name: Run packaging script
+        run: |
+          echo "Making package.sh executable..."
+          chmod +x ./package.sh
+          echo "Starting the packaging process..."
+          ./package.sh
+          echo "Packaging complete. Files are in the 'output' directory."
+
+      # 步骤 5: 生成一个唯一的标签名，用于创建 Release
+      # 格式为: daily-build-YYYY-MM-DD
+      - name: Generate release tag
+        id: tagger
+        run: echo "TAG_NAME=daily-build-$(date +'%Y-%m-%d')" >> $GITHUB_ENV
+
+      # 步骤 6: 创建 GitHub Release 并上传打包好的插件
+      # 使用 softprops/action-gh-release 动作来简化操作
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # 使用上一步生成的标签名
+          tag_name: ${{ env.TAG_NAME }}
+          # Release 的标题
+          name: "ARM Plugins Daily Build - ${{ env.TAG_NAME }}"
+          # Release 的描述内容
+          body: |
+            Automated daily build of Dify ARM64 plugins.
+            
+            - **Source**: `junjiem/dify-plugin-repackaging`
+            - **Platform**: `linux/arm64`
+          # 标记为预发布版本，表示这是自动构建的
+          prerelease: true
+          # 需要上传的文件路径，`output/*.zip` 会匹配 output 目录下的所有 .zip 文件
+          files: output/*.zip
